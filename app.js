@@ -5,6 +5,8 @@ const rateLimit = require("express-rate-limit");
 const cors = require("cors");
 const hpp = require("hpp");
 const xss = require("xss-clean");
+const cookieParser = require("cookie-parser");
+
 const clc = require("cli-color");
 
 // api routes
@@ -20,6 +22,9 @@ const db = require("./database/connectdb");
 
 // Allow Cross-Origin requests
 app.use(cors());
+
+// cookies parser
+app.use(cookieParser());
 
 // Limit request from the same API
 const limiter = rateLimit({

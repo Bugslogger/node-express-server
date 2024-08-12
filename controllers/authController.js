@@ -1,9 +1,11 @@
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+
 const AppError = require("../utils/api/appError");
 const pool = require("../database/connectdb");
 
 const User = require("../models/userModel");
-const { insertData, createTable } = require("../utils/functions");
+const { insertData, createTable } = require("../utils/api/functions");
 
 const createToken = (id) => {
   return jwt.sign(
@@ -23,38 +25,59 @@ exports.login = async (req, res, next) => {
     if (!pool) {
       return next(new AppError(500, "fail", "database not connected"));
     }
-    // 1) check if email and password exist
-    if (!email || !password) {
-      return next(
-        new AppError(404, "fail", "Please provide email or password"),
-        req,
-        res,
-        next
-      );
+    console.log("req: ", req.headers);
+    if (
+      req.headers["user-agent"].startsWith("Mozilla") &&
+      req.headers["user-agent"].includes("AppleWebKit")
+    ) {
+      res.cookie("user_id", 12345, { maxAge: 900000, httpOnly: true }); // Set a cookie
+      if (email && password) {
+        const getPassword = `SELECT * FROM dark.users WHERE email = $1`;
+
+        const user = await pool.query(getPassword, [email]);
+
+        const isValidPassword = bcrypt.compareSync(
+          password,
+          user.rows[0].password
+        );
+        res.cookie("user", email);
+        if (isValidPassword) {
+          res.status(200).json({
+            message: `1 user found with email ${email}`,
+            token: createToken(user.rows[0].id),
+            status: "success",
+            statusCode: 200,
+            cookies: req.cookies,
+          });
+        } else {
+          res
+            .status(200)
+            .json(
+              new AppError(
+                "404",
+                "failed",
+                `user with email ${email} does not exists.`
+              )
+            );
+        }
+      } else {
+        return next(
+          new AppError(404, "fail", "Please provide email or password"),
+          req,
+          res,
+          next
+        );
+      }
+    } else {
+      res.status(500).json({
+        ...new AppError(
+          "500",
+          "failed",
+          "you must call api from web interface only."
+        ),
+        message: "you must call api from web interface only.",
+      });
     }
-
-    const isUserExist = await pool.query(`SELECT EXISTS (
-    SELECT FROM information_schema.tables 
-    WHERE  table_schema = 'dark'
-    AND    table_name   = 'users'
-    );`);
-
-    if (!isUserExist.rows[0].exists) {
-      return next(
-        new AppError(404, "fail", "user does not exist."),
-        req,
-        res,
-        next
-      );
-    }
-
-    const token = createToken(8);
-
-    res.status(200).json({
-      status: "success",
-      code: 200,
-      token,
-    });
   } catch (error) {
     next(error);
   }
@@ -62,14 +85,13 @@ exports.login = async (req, res, next) => {
 
 exports.signup = async (req, res, next) => {
   try {
-    const email = req.body.email;
-    if (User.email.validate(email) && req.body.password) {
-      const body = Object.values(req.body);
+    const { email, password } = req.body;
 
+    if (User.email.validate(email) && req.body.password) {
       const validateField = `SELECT EXISTS (
           SELECT 1
-          FROM users
-          WHERE email = ${email}
+          FROM dark.users
+          WHERE email = $1
       )`;
 
       const validateTable = await pool.query(`SELECT EXISTS (
@@ -77,48 +99,54 @@ exports.signup = async (req, res, next) => {
         WHERE  table_schema = 'dark'
         AND    table_name   = 'users'
         );`);
-      console.log(validateTable.rows[0].exists);
+
+      const hashPassword = bcrypt.hashSync(password, process.env.SALT);
+
       if (!validateTable.rows[0].exists) {
         try {
           createTable(pool, User, "users");
-          // insertData(pool, ["email", "password"], body, "users").then(
-          //   (data) => {
-          //     console.log("line 82 ", data);
-          //     res.status(201).json({
-          //       status: "success",
-          //       code: 201,
-          //       message: `user created with ${email}.`,
-          //     });
-          //   }
-          // );
+          insertData(
+            pool,
+            ["email", "password"],
+            [email, hashPassword],
+            "users"
+          ).then((data) => {
+            res.status(201).json({
+              status: "success",
+              code: 201,
+              message: `user created with ${email}.`,
+            });
+          });
           res.status(201).json({
-                  status: "success",
-                  code: 201,
-                  message: `user created with ${email}.`,
-                });
+            status: "success",
+            code: 201,
+            message: `user created with ${email}.`,
+          });
         } catch (error) {
           next(error);
         }
       } else {
-        const isEmailExits = pool.query(validateField);
-        if (isEmailExits) {
+        const isEmailExits = await pool.query(validateField, [email]);
+        console.log(isEmailExits);
+        if (isEmailExits.rows[0].exists) {
           res.status(200).json({
             status: "success",
             code: 200,
             message: "user with this email already exists.",
           });
-          console.log(isEmailExits);
         } else {
-          insertData(pool, ["email", "password"], body, "users").then(
-            (data) => {
-              console.log("line 82 ", data);
-              res.status(201).json({
-                status: "success",
-                code: 201,
-                message: `user created with ${email}.`,
-              });
-            }
-          );
+          insertData(
+            pool,
+            ["email", "password"],
+            [email, hashPassword],
+            "users"
+          ).then((data) => {
+            res.status(201).json({
+              status: "success",
+              code: 201,
+              message: `user created with ${email}.`,
+            });
+          });
         }
       }
     } else {

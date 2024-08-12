@@ -79,11 +79,15 @@ exports.insertData = async function (db, cols = [], data = [], tableName) {
     throw new Error("Invalid databse pool");
   }
 
-  const formatedData = data.join(",");
+  const formatedData = data.map((_, i) => `$${i + 1}`).join(",");
   console.log(tableName, formatedData, cols.join(","));
-  const insertQuery = `INSERT INTO ${tableName} (${cols.join(",")})
+  const insertQuery = `INSERT INTO dark.${tableName} (${cols.join(",")})
                         VALUES (${formatedData})`;
 
-  const result = await db.query(insertQuery);
-  console.log(result);
+  try {
+    const result = await db.query(insertQuery, data);
+    console.log(result);
+  } catch (error) {
+    return new Error(error);
+  }
 };
